@@ -103,11 +103,8 @@ void handle_requests(int server_fd) {
 }
 
 int main(int argc, char *argv[]) {
-    if (argc > 3) {
-        printf("To many arguments\n");
-        return 0;
-    } else if (argc < 3) {
-        printf("What the fuck are you doin\n");
+    if (argc > 3 || argc < 3) {
+        printf("help: [domain] [port]\n");
         return 0;
     }
 
