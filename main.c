@@ -5,13 +5,26 @@
 #include <sys/socket.h>
 #include <unistd.h>
 
-char *read_html(const char *filename) {
+struct file_data {
+    char *buffer;
+    size_t size;
+};
+
+struct file_data read_file(const char *filename) {
+    struct file_data file_info = {NULL, 0};
+
+    if (strcmp(filename, "/") == 0) {
+        filename = "index.html";
+    } else {
+        filename = &filename[1];
+    }
+
     FILE *file;
     file = fopen(filename, "rb");
 
     if (!file) {
         perror("Error opening file");
-        return NULL;
+        return file_info;
     }
 
     fseek(file, 0, SEEK_END);
@@ -22,22 +35,26 @@ char *read_html(const char *filename) {
     if (!buffer) {
         perror("Malloc failed");
         fclose(file);
-        return NULL;
+        return file_info;
     }
 
     size_t read_size = fread(buffer, sizeof(char), file_size, file);
 
     if (read_size != file_size) {
+        printf("%s\n", filename);
         perror("Failed to open entire file");
         free(buffer);
         fclose(file);
-        return NULL;
+        return file_info;
     }
 
     buffer[read_size] = '\0';
 
+    file_info.buffer = buffer;
+    file_info.size = read_size;
+
     fclose(file);
-    return buffer;
+    return file_info;
 }
 
 int create_socket(const char *domain, const int port) {
@@ -64,7 +81,7 @@ int create_socket(const char *domain, const int port) {
         return -1;
     }
 
-    printf("Server listening on %d\n", port);
+    printf("Server listening on %s:%d\n", domain, port);
 
     return server_fd;
 }
@@ -79,26 +96,45 @@ void handle_requests(int server_fd) {
 
         char buffer[1024];
         recv(client_fd, buffer, sizeof(buffer), 0);
+        char *buffer_copy = strdup(buffer);
 
-        char *headers =
-            "HTTP/1.1 200 OK\r\nContent-Type: text/html\r\nContent-Length: %ld; "
-            "charset=UTF-8\r\n\r\n%s";
-        char *html = read_html("index.html");
+        char *request_file = strtok(strchr(strtok(buffer, "\n"), '/'), " ");
+        char *request_accept = strtok(buffer_copy, "\n");
+        request_accept = strtok(NULL, "\n");
+        request_accept = strtok(NULL, "\n");
+        request_accept = strtok(NULL, "\n");
+        request_accept = strtok(&strtok(request_accept, ",")[0], " ");
+        request_accept = strtok(NULL, " ");
 
-        if (!html) {
+        if (strcmp(request_accept, "image/avif") == 0) {
+            request_accept = "image/png";
+        }
+
+        struct file_data file_data = read_file(request_file);
+        if (file_data.buffer == NULL || file_data.size < 0) {
             const char *response = "HTTP/1.1 500 Internal Server Error\r\n\r\n";
             send(client_fd, response, strlen(response), 0);
             close(client_fd);
             continue;
         }
 
-        char response[strlen(headers) + strlen(html)];
-        snprintf(response, sizeof(response), headers, strlen(html), html);
+        char *headers =
+            "HTTP/1.1 200 OK\r\n"
+            "Content-Type: %s\r\n"
+            "Content-Length: %ld\r\n\r\n"
+            "%s";
 
-        send(client_fd, response, strlen(response), 0);
+        char response[strlen(headers) + file_data.size + 50];
+
+        int respone_len = snprintf(response, sizeof(response), headers,
+                                   request_accept, file_data.size, file_data.buffer);
+
+        printf("%s\n", file_data.buffer);
+
+        send(client_fd, response, respone_len, 0);
 
         close(client_fd);
-        free(html);
+        free(file_data.buffer);
     }
 }
 
